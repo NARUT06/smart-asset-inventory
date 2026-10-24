@@ -1,0 +1,356 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
+enum Role {
+  ADMIN
+  PROCUREMENT
+  CUSTODIAN
+  TECHNICIAN
+  AUDITOR
+}
+
+enum LocationType {
+  CAMPUS
+  BUILDING
+  FLOOR
+  ROOM
+  OFFICE
+  LAB
+  STORAGE
+}
+
+enum AssetStatus {
+  IN_USE
+  IN_STORAGE
+  UNDER_MAINTENANCE
+  RETIRED
+}
+
+enum AssetCondition {
+  NEW
+  GOOD
+  FAIR
+  POOR
+  DAMAGED
+}
+
+enum WorkOrderType {
+  CORRECTIVE
+  SCHEDULED
+}
+
+enum WorkOrderPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum WorkOrderStatus {
+  OPEN
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum MaintenanceTriggerType {
+  CALENDAR
+  RUNTIME
+  CONDITION
+}
+
+enum StocktakeStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum ObservationResult {
+  VERIFIED
+  MOVED
+  MISSING
+  UNEXPECTED
+}
+
+// ----------------------------------------------------
+// MODELS
+// ----------------------------------------------------
+
+model User {
+  id                Int       @id @default(autoincrement())
+  fullName          String    @db.VarChar(120)
+  email             String    @unique
+  passwordHash      String
+  role              Role      @default(CUSTODIAN)
+  department        String?   @db.VarChar(120)
+  isActive          Boolean   @default(true)
+  passwordChangedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  custodiedAssets    Asset[]           @relation("AssetCustodian")
+  transfersFrom      CustodyTransfer[] @relation("TransferFromCustodian")
+  transfersTo        CustodyTransfer[] @relation("TransferToCustodian")
+  transfersMade      CustodyTransfer[] @relation("TransferredBy")
+  assignedWorkOrders WorkOrder[]       @relation("WorkOrderTechnician")
+  createdWorkOrders  WorkOrder[]       @relation("WorkOrderCreator")
+  auditLogs AuditLog[]
+  stocktakeSessions StocktakeSession[] @relation("StocktakeCreator")
+  scannedObservations Observation[] @relation("ObservationScanner")
+  // حقول حماية كسر كلمات المرور (Account Lockout)
+  failedLoginAttempts Int       @default(0)
+  lockoutUntil        DateTime?
+
+  @@index([role])
+}
+
+// AST-FR-01: CAMPUS -> BUILDING -> FLOOR -> ROOM / OFFICE / LAB / STORAGE
+model Location {
+  id        Int          @id @default(autoincrement())
+  name      String       @db.VarChar(120)
+  code      String       @unique @db.VarChar(40)
+  type      LocationType
+  parentId  Int?
+  parent    Location?    @relation("LocationTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Location[]   @relation("LocationTree")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  assets        Asset[]
+  transfersFrom CustodyTransfer[] @relation("TransferFromLocation")
+  transfersTo   CustodyTransfer[] @relation("TransferToLocation")
+  expectedObservations Observation[] @relation("ExpectedLocation")
+  observedObservations Observation[] @relation("ObservedLocation")
+
+  @@index([parentId])
+}
+
+model Category {
+  id                     Int      @id @default(autoincrement())
+  name                   String   @unique @db.VarChar(120)
+  description            String?  @db.VarChar(500)
+  expectedLifetimeMonths Int
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  assets               Asset[]
+  maintenanceTemplates MaintenanceTemplate[]
+}
+
+// AST-FR-05: Maintenance templates by asset category or model
+model MaintenanceTemplate {
+  id           Int                    @id @default(autoincrement())
+  title        String                 @db.VarChar(200)
+  description  String?                @db.VarChar(1000)
+  triggerType  MaintenanceTriggerType @default(CALENDAR)
+  intervalDays Int
+  checklist    Json                   @default("[]")
+
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+}
+
+// AST-FR-02, AST-FR-03, AST-FR-10
+model Asset {
+  id             Int     @id @default(autoincrement())
+  assetTag       String  @unique
+  serialNumber   String  @unique
+  name           String  @db.VarChar(200)
+  brand          String?
+  model          String?
+  specifications Json    @default("{}")
+
+  // AI & Risk Assessment (AST-FR-09)
+  riskScore        Float?
+  riskLevel        String?  @db.VarChar(20) // LOW | MEDIUM | HIGH | CRITICAL
+  failurePredicted Boolean? @default(false)
+
+  categoryId  Int
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  locationId  Int?
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  custodianId Int?
+  custodian   User?     @relation("AssetCustodian", fields: [custodianId], references: [id], onDelete: Restrict)
+
+  condition AssetCondition @default(NEW)
+  status    AssetStatus    @default(IN_STORAGE)
+
+  // Procurement & Warranty (AST-FR-03)
+  supplierName        String
+  purchaseOrderNumber String?
+  invoiceNumber       String?
+  purchaseCost        Decimal   @db.Decimal(12, 2)
+  purchaseDate        DateTime
+  warrantyExpiry      DateTime?
+  warrantyTerms       String?
+  documentUrl         String?
+
+  // Retirement & Disposal (AST-FR-10)
+  retiredAt        DateTime?
+  retirementReason String?   @db.VarChar(500)
+  disposalEvidence String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transfers     CustodyTransfer[]
+  workOrders    WorkOrder[]
+  riskHistories RiskHistory[]
+  observations  Observation[]
+
+  @@index([categoryId])
+  @@index([locationId])
+  @@index([custodianId])
+  @@index([status])
+  @@index([warrantyExpiry])
+  @@index([riskScore])
+}
+
+// S سجل تتبع تقييمات الخطورة عبر الزمن (AST-FR-09)
+model RiskHistory {
+  id               Int      @id @default(autoincrement())
+  assetId          Int
+  asset            Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  riskScore        Float
+  riskLevel        String   @db.VarChar(20)
+  failurePredicted Boolean  @default(false)
+  factors          Json     @default("{}")
+  recommendations  String?  @db.VarChar(1000)
+  assessedAt       DateTime @default(now())
+
+  @@index([assetId])
+  @@index([assessedAt])
+}
+
+// AST-FR-04: Append-only audit trail
+model CustodyTransfer {
+  id                Int       @id @default(autoincrement())
+  assetId           Int
+  asset             Asset     @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  fromLocationId    Int?
+  fromLocation      Location? @relation("TransferFromLocation", fields: [fromLocationId], references: [id], onDelete: Restrict)
+  toLocationId      Int?
+  toLocation        Location? @relation("TransferToLocation", fields: [toLocationId], references: [id], onDelete: Restrict)
+  fromCustodianId   Int?
+  fromCustodian     User?     @relation("TransferFromCustodian", fields: [fromCustodianId], references: [id], onDelete: Restrict)
+  toCustodianId     Int?
+  toCustodian       User?     @relation("TransferToCustodian", fields: [toCustodianId], references: [id], onDelete: Restrict)
+  transferredBy     Int
+  transferredByUser User      @relation("TransferredBy", fields: [transferredBy], references: [id], onDelete: Restrict)
+  reason            String?   @db.VarChar(1000)
+  createdAt         DateTime  @default(now())
+
+  @@index([assetId])
+  @@index([createdAt])
+}
+
+// AST-FR-06: Work Orders & Service Events
+model WorkOrder {
+  id           Int                @id @default(autoincrement())
+  assetId      Int
+  asset        Asset              @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  technicianId Int?
+  technician   User?              @relation("WorkOrderTechnician", fields: [technicianId], references: [id], onDelete: Restrict)
+  createdBy    Int
+  creator      User               @relation("WorkOrderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  type        WorkOrderType      @default(CORRECTIVE)
+  title       String?            @db.VarChar(200)
+  description String?            @db.VarChar(2000)
+  priority    WorkOrderPriority  @default(MEDIUM)
+  status      WorkOrderStatus    @default(OPEN)
+
+  checklist       Json     @default("[]")
+  partsUsed       String?  @db.VarChar(2000)
+  partsCost       Decimal  @default(0) @db.Decimal(12, 2)
+  downtimeHours   Float    @default(0)
+  completionNotes String?  @db.VarChar(2000)
+
+  scheduledDate DateTime?
+  intervalDays  Int?
+  nextDueDate   DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  previousAssetStatus AssetStatus?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([scheduledDate])
+  @@index([status, scheduledDate])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?     @map("user_id")
+  action    String   @db.VarChar(50)   // CREATE, UPDATE, DELETE, LOGIN, RISK_ASSESSMENT
+  entity    String   @db.VarChar(50)   // ASSET, WORK_ORDER, USER, LOCATION
+  entityId  Int?     @map("entity_id")
+  details   Json?    @default("{}")    // حفظ التغييرات القديمة والجديدة أو أي تفاصيل إضافية
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  createdAt DateTime @default(now())   @map("created_at")
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model StocktakeSession {
+  id          Int              @id @default(autoincrement())
+  name        String           @db.VarChar(200)
+  scope       String?          @db.VarChar(500)
+  status      StocktakeStatus  @default(OPEN)
+  createdBy   Int
+  creator     User             @relation("StocktakeCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+  completedAt DateTime?
+  observations Observation[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Observation {
+  id                   Int                @id @default(autoincrement())
+  sessionId            Int
+  session              StocktakeSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  assetId              Int
+  asset                Asset              @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  expectedLocationId   Int?
+  expectedLocation     Location?          @relation("ExpectedLocation", fields: [expectedLocationId], references: [id], onDelete: Restrict)
+  observedLocationId   Int?
+  observedLocation     Location?          @relation("ObservedLocation", fields: [observedLocationId], references: [id], onDelete: Restrict)
+  expectedCondition    AssetCondition?
+  observedCondition    AssetCondition?
+  result               ObservationResult
+  scannedAt            DateTime           @default(now())
+  scannedBy            Int?
+  scanner              User?              @relation("ObservationScanner", fields: [scannedBy], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([assetId])
+  @@index([result])
+}

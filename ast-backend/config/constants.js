@@ -1,0 +1,90 @@
+const ROLES = Object.freeze({
+  ADMIN: 'ADMIN',
+  PROCUREMENT: 'PROCUREMENT',
+  CUSTODIAN: 'CUSTODIAN',
+  TECHNICIAN: 'TECHNICIAN',
+  AUDITOR: 'AUDITOR',
+});
+
+const LOCATION_TYPES = Object.freeze({
+  CAMPUS: 'CAMPUS',
+  BUILDING: 'BUILDING',
+  FLOOR: 'FLOOR',
+  ROOM: 'ROOM',
+  OFFICE: 'OFFICE',
+  LAB: 'LAB',
+  STORAGE: 'STORAGE',
+});
+
+// Required parent type for each location type (null = root)
+const LOCATION_PARENT_TYPE = Object.freeze({
+  CAMPUS: null,
+  BUILDING: 'CAMPUS',
+  FLOOR: 'BUILDING',
+  ROOM: 'FLOOR',
+  OFFICE: 'FLOOR',
+  LAB: 'FLOOR',
+  STORAGE: 'FLOOR',
+});
+
+// Only leaf spaces can physically hold assets
+const ASSIGNABLE_LOCATION_TYPES = Object.freeze(['ROOM', 'OFFICE', 'LAB', 'STORAGE']);
+
+const ASSET_STATUS = Object.freeze({
+  IN_USE: 'IN_USE',
+  IN_STORAGE: 'IN_STORAGE',
+  UNDER_MAINTENANCE: 'UNDER_MAINTENANCE',
+  RETIRED: 'RETIRED',
+});
+
+const ASSET_CONDITION = Object.freeze({
+  NEW: 'NEW',
+  GOOD: 'GOOD',
+  FAIR: 'FAIR',
+  POOR: 'POOR',
+  DAMAGED: 'DAMAGED',
+});
+
+const WORK_ORDER_TYPE = Object.freeze({
+  CORRECTIVE: 'CORRECTIVE',
+  SCHEDULED: 'SCHEDULED',
+});
+
+const WORK_ORDER_PRIORITY = Object.freeze({
+  LOW: 'LOW',
+  MEDIUM: 'MEDIUM',
+  HIGH: 'HIGH',
+  CRITICAL: 'CRITICAL',
+});
+
+const WORK_ORDER_STATUS = Object.freeze({
+  OPEN: 'OPEN',
+  IN_PROGRESS: 'IN_PROGRESS',
+  ON_HOLD: 'ON_HOLD',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+});
+
+const WORK_ORDER_ACTIVE_STATUSES = Object.freeze(['OPEN', 'IN_PROGRESS', 'ON_HOLD']);
+
+const WORK_ORDER_TRANSITIONS = Object.freeze({
+  OPEN: ['IN_PROGRESS', 'CANCELLED'],
+  IN_PROGRESS: ['ON_HOLD', 'COMPLETED', 'CANCELLED'],
+  ON_HOLD: ['IN_PROGRESS', 'CANCELLED'],
+  COMPLETED: [],
+  CANCELLED: [],
+});
+
+module.exports = {
+  ROLES,
+  LOCATION_TYPES,
+  LOCATION_PARENT_TYPE,
+  ASSIGNABLE_LOCATION_TYPES,
+  ASSET_STATUS,
+  ASSET_CONDITION,
+  WORK_ORDER_TYPE,
+  WORK_ORDER_PRIORITY,
+  WORK_ORDER_STATUS,
+  WORK_ORDER_ACTIVE_STATUSES,
+  WORK_ORDER_TRANSITIONS,
+};
